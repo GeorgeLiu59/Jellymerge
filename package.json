@@ -1,0 +1,16 @@
+{
+  "name": "flower-suika",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A pastel anniversary flower merge game for Chloe.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "matter-js": "^0.20.0",
+    "vite": "^8.0.8"
+  }
+}
