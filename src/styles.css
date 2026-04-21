@@ -751,6 +751,24 @@ h1 {
     padding-top: 286px;
   }
 
+  .love-envelope {
+    transition: padding-top 180ms ease;
+  }
+
+  .love-envelope summary::before {
+    transition: transform 190ms ease;
+  }
+
+  .love-envelope summary::after {
+    transition: top 160ms ease, opacity 160ms ease;
+  }
+
+  .envelope-letter {
+    transition:
+      opacity 160ms ease,
+      transform 190ms ease;
+  }
+
   .envelope-letter p {
     font-size: 0.82rem;
   }

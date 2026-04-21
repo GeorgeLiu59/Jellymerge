@@ -6,8 +6,8 @@ const { Engine, World, Bodies, Body, Events, Composite } = Matter;
 const isDev = import.meta.env.DEV;
 
 const baseRadii = [25.725, 29.938, 35.154, 49.896, 62.37, 87.318, 84.5, 119, 132.5, 156.5, 181];
-const isCompactViewport = window.matchMedia("(max-width: 820px)").matches;
-const mobileRadiusScale = isCompactViewport ? 0.87 : 1;
+const viewportWidth = Math.max(1, window.innerWidth || 0);
+const mobileRadiusScale = viewportWidth <= 430 ? 0.82 : viewportWidth <= 820 ? 0.9 : 1;
 const radii = baseRadii.map((radius) => Number((radius * mobileRadiusScale).toFixed(3)));
 const evolutionAngles = [20, 52, 84, 116, 148, 180, 212, 244, 276, 308, 340];
 const flowerChain = jellycatSprites.map((sprite, index) => ({
@@ -147,10 +147,14 @@ let won = false;
 let lost = false;
 let gameOverTimer = 0;
 let lastFrame = performance.now();
+let physicsAccumulator = 0;
 let clawOpenAmount = 0.2;
 const merging = new Set();
+const flowerBodiesScratch = [];
 const floorInset = 8;
 const floorThickness = 44;
+const FIXED_TIMESTEP = 1000 / 60;
+const MAX_PHYSICS_STEPS = 4;
 /** Top chrome: carrier rides along the bottom edge of this bar. */
 const RAIL_TOP = 20;
 const RAIL_HEIGHT = 26;
@@ -208,7 +212,7 @@ function pickNextLevel() {
 
 function createEngine() {
   engine = Engine.create({
-    gravity: { x: 0, y: 1.05 }
+    gravity: { x: 0, y: 1.5 }
   });
   engine.positionIterations = 8;
   engine.velocityIterations = 6;
@@ -386,13 +390,15 @@ function restartGame() {
   nextLevel = pickNextLevel();
   updateNextPreview();
   lastFrame = performance.now();
+  physicsAccumulator = 0;
   loop(lastFrame);
 }
 
 function resizeCanvas() {
   width = Math.max(300, Math.floor(stageWrap.clientWidth));
   height = Math.max(320, Math.floor(stageWrap.clientHeight));
-  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const maxDpr = viewportWidth <= 430 ? 1.5 : 2;
+  dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
   canvas.width = Math.floor(width * dpr);
   canvas.height = Math.floor(height * dpr);
   canvas.style.width = `${width}px`;
@@ -403,22 +409,33 @@ function resizeCanvas() {
 }
 
 function loop(now) {
-  const delta = Math.min(now - lastFrame, 32);
+  const delta = Math.min(now - lastFrame, 100);
   lastFrame = now;
-  Engine.update(engine, Math.min(delta, 1000 / 60));
-  checkGameOver(delta);
+  physicsAccumulator += delta;
+  let steps = 0;
+  while (physicsAccumulator >= FIXED_TIMESTEP && steps < MAX_PHYSICS_STEPS) {
+    Engine.update(engine, FIXED_TIMESTEP);
+    checkGameOver(FIXED_TIMESTEP);
+    physicsAccumulator -= FIXED_TIMESTEP;
+    steps += 1;
+  }
   draw();
   raf = requestAnimationFrame(loop);
 }
 
 function checkGameOver(delta) {
   if (won || lost) return;
-  const flowers = Composite.allBodies(engine.world).filter((body) => body.flower);
+  const flowers = Composite.allBodies(engine.world);
+  const now = performance.now();
   const dangerY = RAIL_BOTTOM - 24;
-  const crowded = flowers.some(
-    (body) =>
-      body.position.y - flowerChain[body.flower.level].radius < dangerY && performance.now() - body.flower.bornAt > 1500
-  );
+  let crowded = false;
+  for (const body of flowers) {
+    if (!body.flower) continue;
+    if (body.position.y - flowerChain[body.flower.level].radius < dangerY && now - body.flower.bornAt > 1500) {
+      crowded = true;
+      break;
+    }
+  }
   gameOverTimer = crowded ? gameOverTimer + delta : 0;
   if (gameOverTimer > 1200) {
     showGameOver();
@@ -430,11 +447,13 @@ function draw() {
   drawBackground();
   drawDropper();
 
-  const flowers = Composite.allBodies(engine.world)
-    .filter((body) => body.flower)
-    .sort((a, b) => a.flower.level - b.flower.level);
+  flowerBodiesScratch.length = 0;
+  for (const body of Composite.allBodies(engine.world)) {
+    if (body.flower) flowerBodiesScratch.push(body);
+  }
+  flowerBodiesScratch.sort((a, b) => a.flower.level - b.flower.level);
 
-  for (const body of flowers) drawFlowerBody(body);
+  for (const body of flowerBodiesScratch) drawFlowerBody(body);
   drawPetals();
 }
 
