@@ -7,7 +7,7 @@ const isDev = import.meta.env.DEV;
 
 const baseRadii = [25.725, 29.938, 35.154, 49.896, 62.37, 87.318, 89.67, 122.472, 136.08, 161.028, 185.976];
 const isCompactViewport = window.matchMedia("(max-width: 820px)").matches;
-const mobileRadiusScale = isCompactViewport ? 0.9 : 1;
+const mobileRadiusScale = isCompactViewport ? 0.87 : 1;
 const radii = baseRadii.map((radius) => Number((radius * mobileRadiusScale).toFixed(3)));
 const evolutionAngles = [20, 52, 84, 116, 148, 180, 212, 244, 276, 308, 340];
 const flowerChain = jellycatSprites.map((sprite, index) => ({
@@ -268,16 +268,16 @@ function getFlowerBody(body) {
 function createSpriteHitbox(spriteParts, x, y, radius, level) {
   const spreadScale = radius <= 50 ? 0.99 : radius <= 101 ? 0.97 : 0.94;
   const radiusScale = radius <= 50 ? 0.8 : radius <= 101 ? 0.76 : 0.7;
-  const largeLevelTighten = level >= 7 ? 0.94 : 1;
+  const levelTighten = level >= 7 ? 0.94 : 0.97;
   const partOptions = {
     ...suikaPhysics,
     render: { visible: false }
   };
   return spriteParts.map((part) =>
     Bodies.circle(
-      x + part.x * radius * spreadScale * largeLevelTighten,
-      y + part.y * radius * spreadScale * largeLevelTighten,
-      Math.max(3, part.r * radius * 2 * radiusScale * largeLevelTighten),
+      x + part.x * radius * spreadScale * levelTighten,
+      y + part.y * radius * spreadScale * levelTighten,
+      Math.max(3, part.r * radius * 2 * radiusScale * levelTighten),
       partOptions
     )
   );
@@ -414,7 +414,7 @@ function loop(now) {
 function checkGameOver(delta) {
   if (won || lost) return;
   const flowers = Composite.allBodies(engine.world).filter((body) => body.flower);
-  const dangerY = RAIL_BOTTOM - 14;
+  const dangerY = RAIL_BOTTOM - 24;
   const crowded = flowers.some(
     (body) =>
       body.position.y - flowerChain[body.flower.level].radius < dangerY && performance.now() - body.flower.bornAt > 1500

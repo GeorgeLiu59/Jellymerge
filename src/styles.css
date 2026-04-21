@@ -171,7 +171,7 @@ button:focus-visible {
 }
 
 .love-envelope[open] {
-  padding-top: 220px;
+  padding-top: 372px;
 }
 
 .love-envelope summary {
@@ -748,7 +748,7 @@ h1 {
   }
 
   .love-envelope[open] {
-    padding-top: 186px;
+    padding-top: 286px;
   }
 
   .envelope-letter p {
