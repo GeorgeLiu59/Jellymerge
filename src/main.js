@@ -150,7 +150,7 @@ let lastFrame = performance.now();
 let physicsAccumulator = 0;
 let clawOpenAmount = 0.2;
 const merging = new Set();
-const flowerBodiesScratch = [];
+const flowerRenderBuckets = baseRadii.map(() => []);
 const floorInset = 8;
 const floorThickness = 44;
 const FIXED_TIMESTEP = 1000 / 60;
@@ -163,8 +163,8 @@ const PLAY_DEPTH_SKEW = 24;
 const suikaPhysics = {
   friction: 0.032,
   frictionStatic: 0.04,
-  frictionAir: 0.006,
-  restitution: 0.01,
+  frictionAir: 0.009,
+  restitution: 0.002,
   slop: 0.05
 };
 const DEBUG_HITBOXES = new URLSearchParams(window.location.search).has("hitboxes");
@@ -272,7 +272,7 @@ function getFlowerBody(body) {
 function createSpriteHitbox(spriteParts, x, y, radius, level) {
   const spreadScale = radius <= 50 ? 0.99 : radius <= 101 ? 0.97 : 0.94;
   const radiusScale = radius <= 50 ? 0.8 : radius <= 101 ? 0.76 : 0.7;
-  const levelTighten = level >= 7 ? 0.97 : 0.99;
+  const levelTighten = 1;
   const partOptions = {
     ...suikaPhysics,
     render: { visible: false }
@@ -313,7 +313,7 @@ function mergeFlowers(a, b) {
   const vx = (a.velocity.x + b.velocity.x) / 2;
   const vy = (a.velocity.y + b.velocity.y) / 2;
   const created = makeFlower(level, x, y);
-  Body.setVelocity(created, { x: vx * 0.22, y: vy * 0.22 - 0.7 });
+  Body.setVelocity(created, { x: vx * 0.16, y: vy * 0.2 - 0.45 });
 
   setTimeout(() => {
     World.remove(engine.world, [a, b]);
@@ -425,7 +425,7 @@ function loop(now) {
 
 function checkGameOver(delta) {
   if (won || lost) return;
-  const flowers = Composite.allBodies(engine.world);
+  const flowers = engine.world.bodies;
   const now = performance.now();
   const dangerY = RAIL_BOTTOM - 24;
   let crowded = false;
@@ -447,13 +447,14 @@ function draw() {
   drawBackground();
   drawDropper();
 
-  flowerBodiesScratch.length = 0;
-  for (const body of Composite.allBodies(engine.world)) {
-    if (body.flower) flowerBodiesScratch.push(body);
+  for (const bucket of flowerRenderBuckets) bucket.length = 0;
+  for (const body of engine.world.bodies) {
+    if (!body.flower) continue;
+    flowerRenderBuckets[body.flower.level].push(body);
   }
-  flowerBodiesScratch.sort((a, b) => a.flower.level - b.flower.level);
-
-  for (const body of flowerBodiesScratch) drawFlowerBody(body);
+  for (const bucket of flowerRenderBuckets) {
+    for (const body of bucket) drawFlowerBody(body);
+  }
   drawPetals();
 }
 
