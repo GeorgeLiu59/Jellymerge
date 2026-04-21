@@ -3,8 +3,9 @@ import { jellycatSprites } from "./jellycatSprites.js";
 import "./styles.css";
 
 const { Engine, World, Bodies, Body, Events, Composite } = Matter;
+const isDev = import.meta.env.DEV;
 
-const radii = [18, 24, 31, 40, 50, 70, 80, 108, 120, 142, 164];
+const radii = [25.725, 29.938, 35.154, 49.896, 62.37, 87.318, 89.67, 122.472, 136.08, 161.028, 185.976];
 const evolutionAngles = [20, 52, 84, 116, 148, 180, 212, 244, 276, 308, 340];
 const flowerChain = jellycatSprites.map((sprite, index) => ({
   ...sprite,
@@ -25,6 +26,7 @@ app.innerHTML = `
     <div class="quick-controls" aria-label="Quick controls">
       <button id="musicButton" type="button">Music Off</button>
       <button id="restartButton" type="button">Reset</button>
+      ${isDev ? '<button id="debugWinButton" type="button">Debug Win</button><button id="debugLoseButton" type="button">Debug Lose</button>' : ""}
     </div>
 
     <section class="arcade-layout" aria-label="Full Bloom Suika game">
@@ -113,6 +115,8 @@ const scoreEl = document.querySelector("#score");
 const bestEl = document.querySelector("#best");
 const musicButton = document.querySelector("#musicButton");
 const restartButton = document.querySelector("#restartButton");
+const debugWinButton = document.querySelector("#debugWinButton");
+const debugLoseButton = document.querySelector("#debugLoseButton");
 const continueButton = document.querySelector("#continueButton");
 const winRestartButton = document.querySelector("#winRestartButton");
 const winCard = document.querySelector("#winCard");
@@ -137,6 +141,7 @@ let won = false;
 let lost = false;
 let gameOverTimer = 0;
 let lastFrame = performance.now();
+let clawOpenAmount = 0.2;
 const merging = new Set();
 const floorInset = 8;
 const floorThickness = 44;
@@ -154,8 +159,17 @@ const suikaPhysics = {
 };
 const DEBUG_HITBOXES = new URLSearchParams(window.location.search).has("hitboxes");
 
-for (const image of spriteImages.values()) {
-  image.addEventListener("load", updateNextPreview);
+function waitForImage(image) {
+  if (image.complete) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => resolve();
+    image.addEventListener("load", finish, { once: true });
+    image.addEventListener("error", finish, { once: true });
+  });
+}
+
+async function preloadSpriteImages() {
+  await Promise.all([...spriteImages.values()].map(waitForImage));
 }
 
 bestEl.textContent = best;
@@ -230,16 +244,17 @@ function getFlowerBody(body) {
 }
 
 function createSpriteHitbox(spriteParts, x, y, radius) {
-  const scale = radius <= 50 ? 0.82 : radius <= 101 ? 0.88 : 0.92;
+  const spreadScale = radius <= 50 ? 0.99 : radius <= 101 ? 0.97 : 0.94;
+  const radiusScale = radius <= 50 ? 0.8 : radius <= 101 ? 0.76 : 0.7;
   const partOptions = {
     ...suikaPhysics,
     render: { visible: false }
   };
   return spriteParts.map((part) =>
     Bodies.circle(
-      x + part.x * radius,
-      y + part.y * radius,
-      Math.max(3.2, part.r * radius * 2 * scale),
+      x + part.x * radius * spreadScale,
+      y + part.y * radius * spreadScale,
+      Math.max(3, part.r * radius * 2 * radiusScale),
       partOptions
     )
   );
@@ -315,6 +330,18 @@ function showGameOver() {
   }, 260);
 }
 
+function debugTriggerWin() {
+  lost = false;
+  gameOverCard.hidden = true;
+  fullBloom();
+}
+
+function debugTriggerLose() {
+  won = false;
+  winCard.hidden = true;
+  showGameOver();
+}
+
 function restartGame() {
   won = false;
   lost = false;
@@ -362,7 +389,7 @@ function loop(now) {
 function checkGameOver(delta) {
   if (won || lost) return;
   const flowers = Composite.allBodies(engine.world).filter((body) => body.flower);
-  const dangerY = RAIL_BOTTOM + 6;
+  const dangerY = RAIL_BOTTOM - 4;
   const crowded = flowers.some(
     (body) =>
       body.position.y - flowerChain[body.flower.level].radius < dangerY && performance.now() - body.flower.bornAt > 1500
@@ -511,14 +538,17 @@ function drawDropper() {
   const level = currentLevel;
   const radius = flowerChain[level].radius;
   const x = clamp(cursorX, 10, width - 10);
-  const heldRadius = radius;
+  const heldRadius = canDrop ? radius : 26;
+  const heldData = canDrop ? flowerChain[level] : null;
+  const targetOpenAmount = canDrop ? 0.04 : 1;
+  clawOpenAmount += (targetOpenAmount - clawOpenAmount) * 0.28;
   ctx.save();
-  ctx.globalAlpha = canDrop ? 1 : 0.45;
+  ctx.globalAlpha = 1;
   ctx.translate(x, RAIL_BOTTOM - 1);
   ctx.shadowColor = "rgba(55, 45, 40, 0.14)";
   ctx.shadowBlur = 18;
   ctx.shadowOffsetY = 6;
-  drawCloudCarrier(heldRadius, flowerChain[level]);
+  drawCloudCarrier(heldRadius, heldData, clawOpenAmount);
   ctx.shadowColor = "transparent";
   ctx.restore();
 }
@@ -551,323 +581,89 @@ function drawPlush(x, y, radius, data) {
   ctx.save();
   ctx.translate(x, y);
   const image = spriteImages.get(data.src);
-  drawPlushShadow(radius);
   if (image?.complete && image.naturalWidth > 0) {
     ctx.drawImage(image, -radius, -radius, radius * 2, radius * 2);
-  } else {
-    drawLoadingPlush(radius);
   }
   ctx.restore();
 }
 
-function drawPlushShadow() {}
-
-function drawLoadingPlush(radius) {
-  ctx.fillStyle = "rgba(255, 255, 255, 0.82)";
-  ctx.beginPath();
-  ctx.ellipse(0, 0, radius * 0.48, radius * 0.48, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "rgba(214, 95, 145, 0.65)";
-  ctx.beginPath();
-  ctx.arc(-radius * 0.12, -radius * 0.06, radius * 0.035, 0, Math.PI * 2);
-  ctx.arc(radius * 0.12, -radius * 0.06, radius * 0.035, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-function plushGradient(radius, colors) {
-  const gradient = ctx.createRadialGradient(-radius * 0.24, -radius * 0.42, radius * 0.08, 0, 0, radius * 0.95);
-  gradient.addColorStop(0, "#ffffff");
-  gradient.addColorStop(0.48, colors[0]);
-  gradient.addColorStop(1, colors[1]);
-  return gradient;
-}
-
-function drawSoftEllipse(x, y, rx, ry, fill, rotation = 0) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(rotation);
-  ctx.fillStyle = fill;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawPlushBody(radius, colors) {
-  const fill = plushGradient(radius, colors);
-  drawSoftEllipse(0, radius * 0.1, radius * 0.52, radius * 0.62, fill);
-  drawSoftEllipse(0, -radius * 0.36, radius * 0.4, radius * 0.36, fill);
-  drawSoftEllipse(-radius * 0.28, radius * 0.45, radius * 0.18, radius * 0.16, colors[0], -0.2);
-  drawSoftEllipse(radius * 0.28, radius * 0.45, radius * 0.18, radius * 0.16, colors[0], 0.2);
-  drawStitching(radius, colors);
-}
-
-function drawStitching(radius, colors) {
-  ctx.strokeStyle = "rgba(113, 91, 120, 0.14)";
-  ctx.lineWidth = Math.max(1, radius * 0.018);
-  ctx.setLineDash([radius * 0.04, radius * 0.04]);
-  ctx.beginPath();
-  ctx.arc(0, radius * 0.1, radius * 0.42, Math.PI * 0.18, Math.PI * 0.82);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  ctx.fillStyle = "rgba(255,255,255,0.42)";
-  ctx.beginPath();
-  ctx.ellipse(-radius * 0.18, -radius * 0.46, radius * 0.12, radius * 0.05, -0.5, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-function drawBunnyPlush(radius, data) {
-  const colors = data.colors;
-  drawBunnyEars(radius, colors);
-  drawPlushBody(radius, colors);
-  drawPaws(radius, colors);
-  drawFlowerAccent(radius, data.flower, colors[2], colors[3]);
-  drawPlushFace(radius, "bunny");
-}
-
-function drawBunnyEars(radius, colors) {
-  drawSoftEllipse(-radius * 0.22, -radius * 0.84, radius * 0.12, radius * 0.42, colors[1], -0.1);
-  drawSoftEllipse(radius * 0.24, -radius * 0.84, radius * 0.12, radius * 0.42, colors[1], 0.12);
-  drawSoftEllipse(-radius * 0.22, -radius * 0.84, radius * 0.06, radius * 0.3, "rgba(255, 190, 211, 0.62)", -0.1);
-  drawSoftEllipse(radius * 0.24, -radius * 0.84, radius * 0.06, radius * 0.3, "rgba(255, 190, 211, 0.62)", 0.12);
-}
-
-function drawPuppyPlush(radius, data) {
-  const colors = data.colors;
-  drawSoftEllipse(-radius * 0.44, -radius * 0.24, radius * 0.18, radius * 0.34, colors[1], 0.34);
-  drawSoftEllipse(radius * 0.44, -radius * 0.24, radius * 0.18, radius * 0.34, colors[1], -0.34);
-  drawPlushBody(radius, colors);
-  drawSoftEllipse(0, -radius * 0.2, radius * 0.18, radius * 0.12, "#fff8fb");
-  drawPaws(radius, colors);
-  drawFlowerAccent(radius, data.flower, colors[2], colors[3]);
-  drawPlushFace(radius, "puppy");
-}
-
-function drawLambPlush(radius, data) {
-  const colors = data.colors;
-  drawSoftEllipse(-radius * 0.4, -radius * 0.52, radius * 0.17, radius * 0.14, colors[1]);
-  drawSoftEllipse(0, -radius * 0.66, radius * 0.2, radius * 0.16, colors[1]);
-  drawSoftEllipse(radius * 0.4, -radius * 0.52, radius * 0.17, radius * 0.14, colors[1]);
-  drawSoftEllipse(-radius * 0.48, -radius * 0.16, radius * 0.14, radius * 0.2, colors[1], -0.24);
-  drawSoftEllipse(radius * 0.48, -radius * 0.16, radius * 0.14, radius * 0.2, colors[1], 0.24);
-  drawPlushBody(radius, colors);
-  drawPaws(radius, colors);
-  drawFlowerAccent(radius, data.flower, colors[2], colors[3]);
-  drawPlushFace(radius, "lamb");
-}
-
-function drawBearPlush(radius, data) {
-  const colors = data.colors;
-  drawSoftEllipse(-radius * 0.34, -radius * 0.66, radius * 0.17, radius * 0.16, colors[1]);
-  drawSoftEllipse(radius * 0.34, -radius * 0.66, radius * 0.17, radius * 0.16, colors[1]);
-  drawPlushBody(radius, colors);
-  drawSoftEllipse(-radius * 0.34, -radius * 0.66, radius * 0.08, radius * 0.07, "rgba(255, 200, 218, 0.62)");
-  drawSoftEllipse(radius * 0.34, -radius * 0.66, radius * 0.08, radius * 0.07, "rgba(255, 200, 218, 0.62)");
-  drawPaws(radius, colors);
-  drawFlowerAccent(radius, data.flower, colors[2], colors[3]);
-  drawPlushFace(radius, "bear");
-}
-
-function drawDuckPlush(radius, data) {
-  const colors = data.colors;
-  drawSoftEllipse(0, radius * 0.12, radius * 0.58, radius * 0.55, plushGradient(radius, colors));
-  drawSoftEllipse(0.08 * radius, -radius * 0.42, radius * 0.38, radius * 0.35, plushGradient(radius, colors));
-  drawSoftEllipse(-radius * 0.36, radius * 0.04, radius * 0.28, radius * 0.18, colors[1], -0.26);
-  drawSoftEllipse(radius * 0.52, -radius * 0.42, radius * 0.18, radius * 0.1, colors[3], 0.08);
-  drawPaws(radius, colors);
-  drawFlowerAccent(radius, data.flower, colors[2], colors[3]);
-  drawPlushFace(radius, "duck");
-}
-
-function drawDragonPlush(radius, data) {
-  const colors = data.colors;
-  drawSoftEllipse(-radius * 0.52, -radius * 0.04, radius * 0.28, radius * 0.42, colors[3], -0.42);
-  drawSoftEllipse(radius * 0.52, -radius * 0.04, radius * 0.28, radius * 0.42, colors[3], 0.42);
-  drawSoftEllipse(radius * 0.58, radius * 0.42, radius * 0.28, radius * 0.12, colors[1], 0.4);
-  drawPlushBody(radius, colors);
-  drawSoftEllipse(-radius * 0.2, -radius * 0.78, radius * 0.08, radius * 0.18, colors[2], -0.18);
-  drawSoftEllipse(radius * 0.2, -radius * 0.78, radius * 0.08, radius * 0.18, colors[2], 0.18);
-  drawPaws(radius, colors);
-  drawFlowerAccent(radius, data.flower, colors[2], colors[3]);
-  drawPlushFace(radius, "dragon");
-}
-
-function drawKittyPlush(radius, data) {
-  const colors = data.colors;
-  drawTriangleEar(-radius * 0.32, -radius * 0.72, radius * 0.22, colors[1], -0.1);
-  drawTriangleEar(radius * 0.32, -radius * 0.72, radius * 0.22, colors[1], 0.1);
-  drawPlushBody(radius, colors);
-  drawPaws(radius, colors);
-  drawFlowerAccent(radius, data.flower, colors[2], colors[3]);
-  drawPlushFace(radius, "kitty");
-}
-
-function drawTriangleEar(x, y, size, fill, rotation) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(rotation);
-  ctx.fillStyle = fill;
-  ctx.beginPath();
-  ctx.moveTo(0, -size);
-  ctx.lineTo(size * 0.86, size * 0.62);
-  ctx.lineTo(-size * 0.86, size * 0.62);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawHydrangeaPlush(radius, data) {
-  const colors = data.colors;
-  drawBunnyEars(radius, [colors[0], colors[1]]);
-  drawPlushBody(radius, colors);
-  for (let i = 0; i < 24; i += 1) {
-    const angle = i * 2.399 + 0.2;
-    const dist = radius * (0.16 + (i % 6) * 0.09);
-    ctx.save();
-    ctx.translate(Math.cos(angle) * dist, -radius * 0.1 + Math.sin(angle) * dist);
-    ctx.rotate(angle);
-    drawTinyBlossom(radius * 0.07, i % 3 === 0 ? colors[1] : i % 2 ? colors[2] : colors[3]);
-    ctx.restore();
-  }
-  drawPaws(radius, colors);
-  drawPlushFace(radius, "bunny");
-}
-
-function drawPaws(radius, colors) {
-  drawSoftEllipse(-radius * 0.22, radius * 0.56, radius * 0.13, radius * 0.09, colors[1], -0.08);
-  drawSoftEllipse(radius * 0.22, radius * 0.56, radius * 0.13, radius * 0.09, colors[1], 0.08);
-  ctx.fillStyle = "rgba(112, 87, 125, 0.24)";
-  for (const side of [-1, 1]) {
-    for (let i = 0; i < 3; i += 1) {
-      ctx.beginPath();
-      ctx.arc(side * radius * (0.18 + i * 0.035), radius * 0.55, Math.max(1.2, radius * 0.012), 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-}
-
-function drawPlushFace(radius, kind) {
-  const faceY = kind === "duck" ? -radius * 0.42 : -radius * 0.34;
-  ctx.fillStyle = "rgba(73, 61, 82, 0.78)";
-  ctx.beginPath();
-  ctx.arc(-radius * 0.13, faceY, radius * 0.034, 0, Math.PI * 2);
-  ctx.arc(radius * 0.13, faceY, radius * 0.034, 0, Math.PI * 2);
-  ctx.fill();
-
-  if (kind !== "duck") {
-    ctx.fillStyle = "rgba(73, 61, 82, 0.68)";
-    ctx.beginPath();
-    ctx.ellipse(0, faceY + radius * 0.08, radius * 0.035, radius * 0.024, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  ctx.strokeStyle = "rgba(73, 61, 82, 0.62)";
-  ctx.lineWidth = Math.max(1, radius * 0.018);
-  ctx.beginPath();
-  ctx.arc(0, faceY + radius * 0.1, radius * 0.1, 0.2, Math.PI - 0.2);
-  ctx.stroke();
-
-  ctx.fillStyle = "rgba(255, 151, 178, 0.25)";
-  ctx.beginPath();
-  ctx.ellipse(-radius * 0.27, faceY + radius * 0.1, radius * 0.08, radius * 0.04, 0, 0, Math.PI * 2);
-  ctx.ellipse(radius * 0.27, faceY + radius * 0.1, radius * 0.08, radius * 0.04, 0, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-function drawFlowerAccent(radius, flower, petalColor, centerColor) {
-  ctx.save();
-  const crown = flower === "hydrangea" || flower === "bouquet";
-  const count = crown ? 9 : flower === "daisy" ? 7 : 5;
-  const y = crown ? -radius * 0.72 : radius * 0.04;
-  const spread = crown ? radius * 0.46 : radius * 0.22;
-  for (let i = 0; i < count; i += 1) {
-    const t = count === 1 ? 0.5 : i / (count - 1);
-    const px = crown ? -spread + t * spread * 2 : radius * 0.28;
-    const py = crown ? y + Math.sin(t * Math.PI) * -radius * 0.08 : y;
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(i * 0.7);
-    drawTinyBlossom(radius * (crown ? 0.055 : 0.075), i % 2 ? petalColor : "#fff7fb", centerColor);
-    ctx.restore();
-    if (!crown) break;
-  }
-  ctx.restore();
-}
-
-function drawTinyBlossom(size, color, center = "#fff6ae") {
-  ctx.fillStyle = color;
-  for (let i = 0; i < 5; i += 1) {
-    ctx.rotate((Math.PI * 2) / 5);
-    ctx.beginPath();
-    ctx.ellipse(0, -size, size * 0.62, size, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.fillStyle = center;
-  ctx.beginPath();
-  ctx.arc(0, 0, size * 0.45, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-function drawCloudCarrier(heldRadius, data) {
+function drawCloudCarrier(heldRadius, data, openAmount) {
   ctx.save();
   const scale = Math.min(1, 102 / (heldRadius + 38));
   ctx.scale(scale, scale);
-  const dropY = heldRadius + 22;
-  const cy = -14;
+  const peachLift = data?.name === "Peach" ? 12 : 0;
+  const dropY = heldRadius + 10 - peachLift;
+  const mastTop = -48;
+  const hubY = -9;
+  const clawLength = 34;
+  const armSpread = 9 + openAmount * 24;
+  const armDrop = 12 + openAmount * 10;
+  const pivotY = hubY + 10;
 
-  ctx.fillStyle = "rgba(55, 45, 40, 0.08)";
-  ctx.beginPath();
-  ctx.ellipse(0, 4, 44, 9, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  const puff = (px, py, r) => {
-    ctx.beginPath();
-    ctx.arc(px, py, r, 0, Math.PI * 2);
-    ctx.fill();
-  };
-  ctx.fillStyle = "#fdfcfa";
-  puff(-24, cy, 13);
-  puff(-10, cy - 7, 17);
-  puff(8, cy - 6, 16);
-  puff(26, cy, 12);
-  puff(0, cy + 10, 23);
-  puff(-18, cy + 6, 11);
-  puff(18, cy + 5, 11);
-
-  ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
-  ctx.beginPath();
-  ctx.ellipse(-14, cy - 8, 9, 4, -0.35, 0, Math.PI * 2);
-  ctx.ellipse(12, cy - 6, 7, 3.2, 0.25, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = "rgba(210, 195, 185, 0.35)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(-10, cy - 3, 12, 0.8, 2.1);
-  ctx.stroke();
-
-  ctx.fillStyle = "#6b5d56";
-  ctx.beginPath();
-  ctx.arc(-8, cy - 1, 2.1, 0, Math.PI * 2);
-  ctx.arc(8, cy - 1, 2.1, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = "#8a7a72";
-  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = "rgba(168, 178, 191, 0.95)";
+  ctx.lineWidth = 3;
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.arc(0, cy + 3, 5.5, 0.2, Math.PI - 0.2);
+  ctx.moveTo(0, mastTop);
+  ctx.lineTo(0, hubY - 12);
   ctx.stroke();
 
-  ctx.strokeStyle = "rgba(190, 175, 165, 0.55)";
-  ctx.lineWidth = 2;
+  const housingGrad = ctx.createLinearGradient(0, hubY - 18, 0, hubY + 10);
+  housingGrad.addColorStop(0, "#f7faff");
+  housingGrad.addColorStop(0.52, "#c7d0db");
+  housingGrad.addColorStop(1, "#8f9baa");
+  ctx.fillStyle = housingGrad;
+  ctx.strokeStyle = "rgba(82, 94, 110, 0.7)";
+  ctx.lineWidth = 1.4;
   ctx.beginPath();
-  ctx.moveTo(0, cy + 20);
-  ctx.quadraticCurveTo(1.5, cy + 30, 0, Math.max(cy + 36, dropY - heldRadius - 4));
+  ctx.roundRect(-20, hubY - 18, 40, 26, 8);
+  ctx.fill();
   ctx.stroke();
 
-  drawPlush(0, dropY, heldRadius, data);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.62)";
+  ctx.beginPath();
+  ctx.roundRect(-16, hubY - 14, 32, 5, 4);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(121, 132, 147, 0.5)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(-11, hubY - 2);
+  ctx.lineTo(11, hubY - 2);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(88, 101, 118, 0.85)";
+  ctx.beginPath();
+  ctx.roundRect(-9, pivotY - 6, 18, 7, 3);
+  ctx.fill();
+
+  const drawClawArm = (side) => {
+    const pivotX = side * 7;
+    const tipX = side * armSpread;
+    const tipY = pivotY + armDrop;
+    const clawTipX = tipX + side * (2 + openAmount * 6);
+    const clawTipY = tipY + clawLength * (0.32 + openAmount * 0.08);
+    ctx.strokeStyle = "rgba(104, 116, 132, 0.95)";
+    ctx.lineWidth = 3.4;
+    ctx.beginPath();
+    ctx.moveTo(pivotX, pivotY);
+    ctx.lineTo(tipX, tipY);
+    ctx.lineTo(clawTipX, clawTipY);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(232, 238, 246, 0.8)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(pivotX + side * 0.6, pivotY + 0.5);
+    ctx.lineTo(tipX + side * 0.5, tipY + 0.5);
+    ctx.stroke();
+  };
+  drawClawArm(-1);
+  drawClawArm(1);
+
+  if (data) {
+    drawPlush(0, dropY, heldRadius, data);
+  }
   ctx.restore();
 }
 
@@ -924,11 +720,23 @@ function drawPetals() {
 }
 
 let audioCtx;
-let musicEnabled = false;
-const musicTrack = new Audio(new URL("../suika_ost.mp3", import.meta.url));
+let musicEnabled = true;
+const musicTrack = new Audio(new URL("../assets/audio/suika_ost.mp3", import.meta.url));
+const dropSfxTrack = new Audio(new URL("../assets/audio/drop.wav", import.meta.url));
+const mergeSfxTrack = new Audio(new URL("../assets/audio/remove.wav", import.meta.url));
 musicTrack.loop = true;
 musicTrack.preload = "auto";
 musicTrack.volume = 0.5;
+dropSfxTrack.preload = "auto";
+mergeSfxTrack.preload = "auto";
+dropSfxTrack.volume = 0.45;
+mergeSfxTrack.volume = 0.52;
+musicButton.textContent = "Music On";
+
+function unlockAudioOnFirstInteraction() {
+  startAudio();
+  if (musicEnabled) startMusic();
+}
 
 function startAudio() {
   if (!audioCtx) audioCtx = new AudioContext();
@@ -956,13 +764,20 @@ function stopMusic() {
   musicTrack.pause();
 }
 
+function playSfx(track, volumeMultiplier = 1) {
+  const instance = track.cloneNode();
+  instance.currentTime = 0;
+  instance.volume = Math.max(0, Math.min(1, track.volume * volumeMultiplier));
+  const attempt = instance.play();
+  if (attempt?.catch) attempt.catch(() => {});
+}
+
 function playDropSound() {
-  playTone(520, 0.045, "sine", 0.025);
+  playSfx(dropSfxTrack);
 }
 
 function playMergeSound(level) {
-  playTone(640 + level * 24, 0.08, "triangle", 0.04);
-  setTimeout(() => playTone(860 + level * 30, 0.07, "sine", 0.026), 55);
+  playSfx(mergeSfxTrack, 1 + Math.min(level * 0.02, 0.12));
 }
 
 function playWinSound() {
@@ -1002,14 +817,24 @@ canvas.addEventListener("pointerdown", (event) => {
 
 musicButton.addEventListener("click", toggleMusic);
 restartButton.addEventListener("click", restartGame);
+if (isDev) {
+  debugWinButton.addEventListener("click", debugTriggerWin);
+  debugLoseButton.addEventListener("click", debugTriggerLose);
+}
 continueButton.addEventListener("click", continueAfterWin);
 winRestartButton.addEventListener("click", restartGame);
 gameOverRestartButton.addEventListener("click", restartGame);
 window.addEventListener("resize", resizeCanvas);
+window.addEventListener("click", unlockAudioOnFirstInteraction, { once: true });
 
-createEngine();
-currentLevel = pickNextLevel();
-nextLevel = pickNextLevel();
-resizeCanvas();
-updateNextPreview();
-loop(performance.now());
+async function init() {
+  await preloadSpriteImages();
+  createEngine();
+  currentLevel = pickNextLevel();
+  nextLevel = pickNextLevel();
+  resizeCanvas();
+  updateNextPreview();
+  loop(performance.now());
+}
+
+init();

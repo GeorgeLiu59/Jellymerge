@@ -27,20 +27,34 @@ ORDER = [
 ]
 
 
-def is_background(pixel: tuple[int, int, int, int]) -> bool:
+def is_background(
+    pixel: tuple[int, int, int, int],
+    *,
+    plain_brightness_min: int = 224,
+    plain_spread_max: int = 32,
+    extreme_brightness_min: int = 244,
+    extreme_spread_max: int = 14,
+) -> bool:
     r, g, b, _ = pixel
     brightness = (r + g + b) / 3
     spread = max(r, g, b) - min(r, g, b)
     # Keep plush whites by only classifying very neutral edge tones as background.
-    is_plain_photo_backdrop = brightness > 224 and spread < 32
-    is_extreme_white_backdrop = brightness > 244 and spread < 14
+    is_plain_photo_backdrop = brightness > plain_brightness_min and spread < plain_spread_max
+    is_extreme_white_backdrop = brightness > extreme_brightness_min and spread < extreme_spread_max
     return is_plain_photo_backdrop or is_extreme_white_backdrop
 
 
-def flood_background(image: Image.Image) -> Image.Image:
+def flood_background(image: Image.Image, background_profile: dict[str, int] | None = None) -> Image.Image:
     rgba = image.convert("RGBA")
     width, height = rgba.size
     pixels = rgba.load()
+    profile = background_profile or {}
+    plain_brightness_min = profile.get("plain_brightness_min", 224)
+    plain_spread_max = profile.get("plain_spread_max", 32)
+    extreme_brightness_min = profile.get("extreme_brightness_min", 244)
+    extreme_spread_max = profile.get("extreme_spread_max", 14)
+    expansion_brightness_min = profile.get("expansion_brightness_min", 232)
+    expansion_spread_max = profile.get("expansion_spread_max", 24)
     seen = bytearray(width * height)
     queue: deque[tuple[int, int]] = deque()
 
@@ -62,7 +76,13 @@ def flood_background(image: Image.Image) -> Image.Image:
     mask_pixels = mask.load()
     while queue:
         x, y = queue.popleft()
-        if not is_background(pixels[x, y]):
+        if not is_background(
+            pixels[x, y],
+            plain_brightness_min=plain_brightness_min,
+            plain_spread_max=plain_spread_max,
+            extreme_brightness_min=extreme_brightness_min,
+            extreme_spread_max=extreme_spread_max,
+        ):
             continue
         mask_pixels[x, y] = 255
         push(x + 1, y)
@@ -85,7 +105,7 @@ def flood_background(image: Image.Image) -> Image.Image:
                     or mask_pixels[x, y + 1] > 0
                     or mask_pixels[x, y - 1] > 0
                 )
-                if touches_background and spread < 24 and brightness > 232:
+                if touches_background and spread < expansion_spread_max and brightness > expansion_brightness_min:
                     additions.append((x, y))
         if not additions:
             break
@@ -113,26 +133,39 @@ def reduce_edge_shadows(image: Image.Image) -> Image.Image:
     alpha = rgba.getchannel("A")
     alpha_pixels = alpha.load()
 
+    tops = [-1] * width
     bottoms = [-1] * width
     for x in range(width):
+        for y in range(height):
+            if alpha_pixels[x, y] > 0:
+                tops[x] = y
+                break
         for y in range(height - 1, -1, -1):
             if alpha_pixels[x, y] > 0:
                 bottoms[x] = y
                 break
 
     for x, bottom in enumerate(bottoms):
-        if bottom < 0:
+        top = tops[x]
+        if bottom < 0 or top < 0:
             continue
-        start = max(0, bottom - 34)
+        # Strictly target the lower half near the local silhouette base.
+        half_line = top + int((bottom - top) * 0.5)
+        local_band = max(12, min(30, int((bottom - top) * 0.24)))
+        start = max(half_line, bottom - local_band)
+        lower_focus_start = top + int((bottom - top) * 0.56)
         span = max(1, bottom - start)
         for y in range(start, bottom + 1):
             alpha_value = alpha_pixels[x, y]
             if alpha_value == 0:
                 continue
+            if y < lower_focus_start:
+                continue
             r, g, b, _ = pixels[x, y]
             brightness = (r + g + b) / 3
             spread = max(r, g, b) - min(r, g, b)
-            if spread > 36 or brightness < 96 or brightness > 222:
+            # Only desaturate neutral-ish bottom shadows; avoid plush details.
+            if spread > 28 or brightness < 86 or brightness > 228:
                 continue
 
             touches_air = False
@@ -144,11 +177,265 @@ def reduce_edge_shadows(image: Image.Image) -> Image.Image:
                 continue
 
             edge_bias = (y - start) / span
-            faded_alpha = int(alpha_value * (1 - 0.45 * edge_bias))
-            if faded_alpha < 64:
+            # Stronger suppression near the local bottom edge to remove halo rings.
+            fade_strength = 0.22 + edge_bias * (0.82 if spread < 14 else 0.68)
+            faded_alpha = int(alpha_value * (1 - fade_strength * edge_bias))
+            if edge_bias > 0.76 and spread < 20 and brightness > 120:
+                faded_alpha = int(faded_alpha * 0.68)
+            if faded_alpha < 72:
                 faded_alpha = 0
             pixels[x, y] = (r, g, b, faded_alpha)
 
+    return rgba
+
+
+def remove_bottom_halo_rim(image: Image.Image) -> Image.Image:
+    """Aggressively strip bright halo pixels near the silhouette base."""
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    pixels = rgba.load()
+    alpha = rgba.getchannel("A")
+    alpha_pixels = alpha.load()
+
+    tops = [-1] * width
+    bottoms = [-1] * width
+    for x in range(width):
+        for y in range(height):
+            if alpha_pixels[x, y] > 0:
+                tops[x] = y
+                break
+        for y in range(height - 1, -1, -1):
+            if alpha_pixels[x, y] > 0:
+                bottoms[x] = y
+                break
+
+    for x, bottom in enumerate(bottoms):
+        top = tops[x]
+        if top < 0 or bottom < 0:
+            continue
+        h = bottom - top
+        if h < 8:
+            continue
+        start = max(top + int(h * 0.58), bottom - max(10, int(h * 0.18)))
+        for y in range(start, bottom + 1):
+            a = alpha_pixels[x, y]
+            if a == 0:
+                continue
+
+            touches_air = False
+            for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                if nx < 0 or nx >= width or ny < 0 or ny >= height or alpha_pixels[nx, ny] == 0:
+                    touches_air = True
+                    break
+            if not touches_air:
+                continue
+
+            r, g, b, _ = pixels[x, y]
+            brightness = (r + g + b) / 3
+            spread = max(r, g, b) - min(r, g, b)
+            edge_bias = (y - start) / max(1, bottom - start)
+
+            # Target light/neutral fringe most strongly at the very bottom edge.
+            if brightness > 126 and spread < 36:
+                new_alpha = int(a * (0.15 + (1 - edge_bias) * 0.25))
+                if edge_bias > 0.7:
+                    new_alpha = int(new_alpha * 0.45)
+            elif brightness > 104 and spread < 24 and edge_bias > 0.75:
+                new_alpha = int(a * 0.4)
+            else:
+                continue
+
+            # Extra hard-cut for the lowest semi-transparent fringe ring.
+            if edge_bias > 0.86 and a < 235 and brightness > 78 and spread < 52:
+                new_alpha = int(new_alpha * 0.22)
+
+            if new_alpha < 90:
+                new_alpha = 0
+            pixels[x, y] = (r, g, b, new_alpha)
+
+    rgba.putalpha(alpha)
+    return rgba
+
+
+def strip_bottom_translucent_fringe(image: Image.Image) -> Image.Image:
+    """Hard-remove translucent pixels below each column's solid base."""
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    pixels = rgba.load()
+    alpha = rgba.getchannel("A")
+    alpha_pixels = alpha.load()
+
+    for x in range(width):
+        bottom_solid = -1
+        for y in range(height - 1, -1, -1):
+            if alpha_pixels[x, y] >= 200:
+                bottom_solid = y
+                break
+        if bottom_solid < 0:
+            continue
+
+        # Remove all lower translucent fringe below the solid silhouette base.
+        for y in range(bottom_solid + 1, height):
+            if alpha_pixels[x, y] > 0:
+                alpha_pixels[x, y] = 0
+
+        # Also trim very weak anti-aliased ring right on the base edge.
+        for y in range(max(0, bottom_solid - 2), min(height, bottom_solid + 2)):
+            a = alpha_pixels[x, y]
+            if a == 0:
+                continue
+            r, g, b, _ = pixels[x, y]
+            brightness = (r + g + b) / 3
+            spread = max(r, g, b) - min(r, g, b)
+            if a < 150 and brightness > 100 and spread < 48:
+                alpha_pixels[x, y] = 0
+
+    rgba.putalpha(alpha)
+    return rgba
+
+
+def keep_largest_alpha_component(image: Image.Image) -> Image.Image:
+    """Remove detached alpha islands (e.g., leftover floor-shadow blobs)."""
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    alpha = rgba.getchannel("A")
+    alpha_pixels = alpha.load()
+    seen = bytearray(width * height)
+    components: list[list[tuple[int, int]]] = []
+
+    for y in range(height):
+        for x in range(width):
+            if alpha_pixels[x, y] == 0:
+                continue
+            idx = y * width + x
+            if seen[idx]:
+                continue
+            seen[idx] = 1
+            queue: deque[tuple[int, int]] = deque([(x, y)])
+            points: list[tuple[int, int]] = []
+            while queue:
+                cx, cy = queue.popleft()
+                points.append((cx, cy))
+                for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+                    if nx < 0 or nx >= width or ny < 0 or ny >= height:
+                        continue
+                    if alpha_pixels[nx, ny] == 0:
+                        continue
+                    nidx = ny * width + nx
+                    if seen[nidx]:
+                        continue
+                    seen[nidx] = 1
+                    queue.append((nx, ny))
+            components.append(points)
+
+    if len(components) <= 1:
+        return rgba
+
+    largest = max(components, key=len)
+    keep = set(largest)
+    for y in range(height):
+        for x in range(width):
+            if alpha_pixels[x, y] == 0:
+                continue
+            if (x, y) not in keep:
+                alpha_pixels[x, y] = 0
+
+    rgba.putalpha(alpha)
+    return rgba
+
+
+def remove_near_white_bottom_band(
+    image: Image.Image,
+    start_ratio: float = 0.7,
+    bright_threshold: int = 178,
+    spread_threshold: int = 42,
+    soft_bright_threshold: int = 160,
+    soft_spread_threshold: int = 30,
+    soft_alpha_max: int = 210,
+) -> Image.Image:
+    """Remove white/near-white fringe pixels only in the bottom image band."""
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    pixels = rgba.load()
+    alpha = rgba.getchannel("A")
+    alpha_pixels = alpha.load()
+    start_y = int(height * start_ratio)
+
+    for y in range(start_y, height):
+        for x in range(width):
+            a = alpha_pixels[x, y]
+            if a == 0:
+                continue
+
+            touches_air = False
+            for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                if nx < 0 or nx >= width or ny < 0 or ny >= height or alpha_pixels[nx, ny] == 0:
+                    touches_air = True
+                    break
+            if not touches_air:
+                continue
+
+            r, g, b, _ = pixels[x, y]
+            brightness = (r + g + b) / 3
+            spread = max(r, g, b) - min(r, g, b)
+            if brightness > bright_threshold and spread < spread_threshold:
+                alpha_pixels[x, y] = 0
+            elif brightness > soft_bright_threshold and spread < soft_spread_threshold and a < soft_alpha_max:
+                alpha_pixels[x, y] = 0
+
+    rgba.putalpha(alpha)
+    return rgba
+
+
+def restore_internal_alpha_holes(image: Image.Image, max_fill_y_ratio: float = 1.0) -> Image.Image:
+    """Restore transparent holes fully enclosed by opaque pixels."""
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    alpha = rgba.getchannel("A")
+    alpha_pixels = alpha.load()
+    fill_y_limit = int(height * max_fill_y_ratio)
+    seen = bytearray(width * height)
+    queue: deque[tuple[int, int]] = deque()
+
+    def push(x: int, y: int) -> None:
+        if 0 <= x < width and 0 <= y < height:
+            index = y * width + x
+            if seen[index]:
+                return
+            seen[index] = 1
+            queue.append((x, y))
+
+    for x in range(width):
+        if alpha_pixels[x, 0] == 0:
+            push(x, 0)
+        if alpha_pixels[x, height - 1] == 0:
+            push(x, height - 1)
+    for y in range(height):
+        if alpha_pixels[0, y] == 0:
+            push(0, y)
+        if alpha_pixels[width - 1, y] == 0:
+            push(width - 1, y)
+
+    while queue:
+        x, y = queue.popleft()
+        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if 0 <= nx < width and 0 <= ny < height and alpha_pixels[nx, ny] == 0:
+                index = ny * width + nx
+                if not seen[index]:
+                    seen[index] = 1
+                    queue.append((nx, ny))
+
+    for y in range(height):
+        for x in range(width):
+            if y > fill_y_limit:
+                continue
+            if alpha_pixels[x, y] != 0:
+                continue
+            if seen[y * width + x]:
+                continue
+            alpha_pixels[x, y] = 255
+
+    rgba.putalpha(alpha)
     return rgba
 
 
@@ -249,8 +536,70 @@ def main() -> None:
     for level, (filename, name) in enumerate(ORDER):
         source = SOURCE_DIR / filename
         image = ImageOps.exif_transpose(Image.open(source))
-        clean = flood_background(image)
+        if filename in {"blossom_bunny.jpg", "final_flowers.jpg"}:
+            # Preserve bright upper details by using a stricter white-backdrop profile.
+            clean = flood_background(
+                image,
+                {
+                    "plain_brightness_min": 242,
+                    "plain_spread_max": 10,
+                    "extreme_brightness_min": 248,
+                    "extreme_spread_max": 6,
+                    "expansion_brightness_min": 247,
+                    "expansion_spread_max": 8,
+                },
+            )
+        else:
+            clean = flood_background(image)
         clean = reduce_edge_shadows(clean)
+        clean = remove_bottom_halo_rim(clean)
+        if filename in {"blossom_bunny.jpg", "final_flowers.jpg"}:
+            # Repair only top-region enclosed alpha holes while keeping lower shadow cleanup.
+            clean = restore_internal_alpha_holes(clean, max_fill_y_ratio=0.62)
+        clean = strip_bottom_translucent_fringe(clean)
+        clean = keep_largest_alpha_component(clean)
+        if filename == "blossom_bunny.jpg":
+            clean = remove_near_white_bottom_band(
+                clean,
+                start_ratio=0.73,
+                bright_threshold=194,
+                spread_threshold=24,
+                soft_bright_threshold=182,
+                soft_spread_threshold=18,
+                soft_alpha_max=202,
+            )
+        elif filename == "final_flowers.jpg":
+            clean = remove_near_white_bottom_band(
+                clean,
+                start_ratio=0.79,
+                bright_threshold=198,
+                spread_threshold=26,
+                soft_bright_threshold=182,
+                soft_spread_threshold=20,
+                soft_alpha_max=178,
+            )
+        elif filename == "orange.jpeg":
+            clean = remove_near_white_bottom_band(
+                clean,
+                start_ratio=0.62,
+                bright_threshold=152,
+                spread_threshold=64,
+                soft_bright_threshold=134,
+                soft_spread_threshold=50,
+                soft_alpha_max=244,
+            )
+        elif filename in {"cherry.jpg", "blueberry.jpeg", "peach.jpg"}:
+            clean = remove_near_white_bottom_band(
+                clean,
+                start_ratio=0.66,
+                bright_threshold=166,
+                spread_threshold=52,
+                soft_bright_threshold=146,
+                soft_spread_threshold=40,
+                soft_alpha_max=228,
+            )
+        else:
+            clean = remove_near_white_bottom_band(clean, start_ratio=0.7)
         clean = trim_and_pad(clean)
         clean = fit_square(clean)
         out_name = f"{level + 1:02d}-{Path(filename).stem}.png"
