@@ -5,7 +5,7 @@ import "./styles.css";
 const { Engine, World, Bodies, Body, Events, Composite } = Matter;
 const isDev = import.meta.env.DEV;
 
-const baseRadii = [25.725, 29.938, 35.154, 49.896, 62.37, 87.318, 89.67, 122.472, 136.08, 161.028, 185.976];
+const baseRadii = [25.725, 29.938, 35.154, 49.896, 62.37, 87.318, 84.5, 119, 132.5, 156.5, 181];
 const isCompactViewport = window.matchMedia("(max-width: 820px)").matches;
 const mobileRadiusScale = isCompactViewport ? 0.87 : 1;
 const radii = baseRadii.map((radius) => Number((radius * mobileRadiusScale).toFixed(3)));
@@ -268,7 +268,7 @@ function getFlowerBody(body) {
 function createSpriteHitbox(spriteParts, x, y, radius, level) {
   const spreadScale = radius <= 50 ? 0.99 : radius <= 101 ? 0.97 : 0.94;
   const radiusScale = radius <= 50 ? 0.8 : radius <= 101 ? 0.76 : 0.7;
-  const levelTighten = level >= 7 ? 0.94 : 0.97;
+  const levelTighten = level >= 7 ? 0.97 : 0.99;
   const partOptions = {
     ...suikaPhysics,
     render: { visible: false }

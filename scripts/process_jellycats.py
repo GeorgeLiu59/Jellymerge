@@ -13,17 +13,17 @@ OUT_DIR = ROOT / "public" / "assets" / "jellycats"
 PREVIEW_DIR = ROOT / "processed-preview"
 
 ORDER = [
-    ("cherry.jpg", "Cherry"),
-    ("blueberry.jpeg", "Blueberry"),
-    ("apple.jpg", "Apple"),
-    ("orange.jpeg", "Orange"),
-    ("peach.jpg", "Peach"),
-    ("dragonfruit.jpeg", "Dragonfruit"),
-    ("pancake.jpg", "Pancake"),
-    ("rose.jpg", "Rose"),
-    ("blossom_bunny.jpg", "Blossom Bunny"),
-    ("strawberry_bear.jpg", "Strawberry Bear"),
-    ("final_flowers.jpg", "Anniversary Bouquet"),
+    ("cherry.png", "Cherry"),
+    ("blueberry.png", "Blueberry"),
+    ("apple.png", "Apple"),
+    ("orange.png", "Orange"),
+    ("peach.png", "Peach"),
+    ("dragonfruit.png", "Dragonfruit"),
+    ("pancake.png", "Pancake"),
+    ("rose.png", "Rose"),
+    ("blossom_bunny.png", "Blossom Bunny"),
+    ("strawberry_bear.png", "Strawberry Bear"),
+    ("final_flowers.png", "Anniversary Bouquet"),
 ]
 
 
@@ -344,6 +344,57 @@ def keep_largest_alpha_component(image: Image.Image) -> Image.Image:
     return rgba
 
 
+def remove_tiny_alpha_specks(
+    image: Image.Image, min_pixels: int = 20, alpha_threshold: int = 12
+) -> Image.Image:
+    """Remove tiny detached alpha islands and very faint edge noise."""
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    alpha = rgba.getchannel("A")
+    alpha_pixels = alpha.load()
+    seen = bytearray(width * height)
+
+    # Drop near-invisible fuzz first.
+    for y in range(height):
+        for x in range(width):
+            if alpha_pixels[x, y] < alpha_threshold:
+                alpha_pixels[x, y] = 0
+
+    # Remove very small connected alpha islands.
+    for y in range(height):
+        for x in range(width):
+            if alpha_pixels[x, y] == 0:
+                continue
+            idx = y * width + x
+            if seen[idx]:
+                continue
+
+            seen[idx] = 1
+            queue: deque[tuple[int, int]] = deque([(x, y)])
+            points: list[tuple[int, int]] = []
+
+            while queue:
+                cx, cy = queue.popleft()
+                points.append((cx, cy))
+                for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+                    if nx < 0 or nx >= width or ny < 0 or ny >= height:
+                        continue
+                    if alpha_pixels[nx, ny] == 0:
+                        continue
+                    nidx = ny * width + nx
+                    if seen[nidx]:
+                        continue
+                    seen[nidx] = 1
+                    queue.append((nx, ny))
+
+            if len(points) < min_pixels:
+                for px, py in points:
+                    alpha_pixels[px, py] = 0
+
+    rgba.putalpha(alpha)
+    return rgba
+
+
 def remove_near_white_bottom_band(
     image: Image.Image,
     start_ratio: float = 0.7,
@@ -536,70 +587,76 @@ def main() -> None:
     for level, (filename, name) in enumerate(ORDER):
         source = SOURCE_DIR / filename
         image = ImageOps.exif_transpose(Image.open(source))
-        if filename in {"blossom_bunny.jpg", "final_flowers.jpg"}:
-            # Preserve bright upper details by using a stricter white-backdrop profile.
-            clean = flood_background(
-                image,
-                {
-                    "plain_brightness_min": 242,
-                    "plain_spread_max": 10,
-                    "extreme_brightness_min": 248,
-                    "extreme_spread_max": 6,
-                    "expansion_brightness_min": 247,
-                    "expansion_spread_max": 8,
-                },
-            )
+        has_transparency = "A" in image.getbands() and image.getchannel("A").getextrema()[0] < 255
+        if has_transparency:
+            # Trust manually cleaned alpha cutouts from JellyCats/.
+            clean = image.convert("RGBA")
+            clean = remove_tiny_alpha_specks(clean)
         else:
-            clean = flood_background(image)
-        clean = reduce_edge_shadows(clean)
-        clean = remove_bottom_halo_rim(clean)
-        if filename in {"blossom_bunny.jpg", "final_flowers.jpg"}:
-            # Repair only top-region enclosed alpha holes while keeping lower shadow cleanup.
-            clean = restore_internal_alpha_holes(clean, max_fill_y_ratio=0.62)
-        clean = strip_bottom_translucent_fringe(clean)
-        clean = keep_largest_alpha_component(clean)
-        if filename == "blossom_bunny.jpg":
-            clean = remove_near_white_bottom_band(
-                clean,
-                start_ratio=0.73,
-                bright_threshold=194,
-                spread_threshold=24,
-                soft_bright_threshold=182,
-                soft_spread_threshold=18,
-                soft_alpha_max=202,
-            )
-        elif filename == "final_flowers.jpg":
-            clean = remove_near_white_bottom_band(
-                clean,
-                start_ratio=0.79,
-                bright_threshold=198,
-                spread_threshold=26,
-                soft_bright_threshold=182,
-                soft_spread_threshold=20,
-                soft_alpha_max=178,
-            )
-        elif filename == "orange.jpeg":
-            clean = remove_near_white_bottom_band(
-                clean,
-                start_ratio=0.62,
-                bright_threshold=152,
-                spread_threshold=64,
-                soft_bright_threshold=134,
-                soft_spread_threshold=50,
-                soft_alpha_max=244,
-            )
-        elif filename in {"cherry.jpg", "blueberry.jpeg", "peach.jpg"}:
-            clean = remove_near_white_bottom_band(
-                clean,
-                start_ratio=0.66,
-                bright_threshold=166,
-                spread_threshold=52,
-                soft_bright_threshold=146,
-                soft_spread_threshold=40,
-                soft_alpha_max=228,
-            )
-        else:
-            clean = remove_near_white_bottom_band(clean, start_ratio=0.7)
+            if filename in {"blossom_bunny.png", "final_flowers.png"}:
+                # Preserve bright upper details by using a stricter white-backdrop profile.
+                clean = flood_background(
+                    image,
+                    {
+                        "plain_brightness_min": 242,
+                        "plain_spread_max": 10,
+                        "extreme_brightness_min": 248,
+                        "extreme_spread_max": 6,
+                        "expansion_brightness_min": 247,
+                        "expansion_spread_max": 8,
+                    },
+                )
+            else:
+                clean = flood_background(image)
+            clean = reduce_edge_shadows(clean)
+            clean = remove_bottom_halo_rim(clean)
+            if filename in {"blossom_bunny.png", "final_flowers.png"}:
+                # Repair only top-region enclosed alpha holes while keeping lower shadow cleanup.
+                clean = restore_internal_alpha_holes(clean, max_fill_y_ratio=0.62)
+            clean = strip_bottom_translucent_fringe(clean)
+            clean = keep_largest_alpha_component(clean)
+            if filename == "blossom_bunny.png":
+                clean = remove_near_white_bottom_band(
+                    clean,
+                    start_ratio=0.73,
+                    bright_threshold=194,
+                    spread_threshold=24,
+                    soft_bright_threshold=182,
+                    soft_spread_threshold=18,
+                    soft_alpha_max=202,
+                )
+            elif filename == "final_flowers.png":
+                clean = remove_near_white_bottom_band(
+                    clean,
+                    start_ratio=0.79,
+                    bright_threshold=198,
+                    spread_threshold=26,
+                    soft_bright_threshold=182,
+                    soft_spread_threshold=20,
+                    soft_alpha_max=178,
+                )
+            elif filename == "orange.png":
+                clean = remove_near_white_bottom_band(
+                    clean,
+                    start_ratio=0.62,
+                    bright_threshold=152,
+                    spread_threshold=64,
+                    soft_bright_threshold=134,
+                    soft_spread_threshold=50,
+                    soft_alpha_max=244,
+                )
+            elif filename in {"cherry.png", "blueberry.png", "peach.png"}:
+                clean = remove_near_white_bottom_band(
+                    clean,
+                    start_ratio=0.66,
+                    bright_threshold=166,
+                    spread_threshold=52,
+                    soft_bright_threshold=146,
+                    soft_spread_threshold=40,
+                    soft_alpha_max=228,
+                )
+            else:
+                clean = remove_near_white_bottom_band(clean, start_ratio=0.7)
         clean = trim_and_pad(clean)
         clean = fit_square(clean)
         out_name = f"{level + 1:02d}-{Path(filename).stem}.png"
