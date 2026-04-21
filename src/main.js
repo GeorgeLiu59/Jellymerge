@@ -43,12 +43,14 @@ app.innerHTML = `
             <summary aria-label="Open or close message envelope"></summary>
             <div class="envelope-letter">
               <p>
-                Happy 4 Years, Babe! I know you always want to know which Jellycat you're getting, so I'm letting you
-                reveal it yourself. There's just one catch: you have to win the game first... Goodluck!
-                <br /><br />
-                Love,<br />
-                George
-              </p>
+            Happy 4 Years, Babe! I saw that the traditional themes for a 4th anniversary are fruits and flowers, but real ones felt a bit too ordinary. I figured a Jellycat version would be much more exciting.
+            <br /><br />
+            I know you always want to know which one you're getting, so I'm letting you reveal it yourself. There's just one catch: you have to win the game first. Your gift will be revealed once you successfully unlock the final Jellycat... Good luck!
+            <br /><br />
+            Love,
+            <br />
+            George
+            </p>
             </div>
           </details>
         </div>
@@ -136,6 +138,7 @@ let best = Number(localStorage.getItem("flowerSuikaBest") || 0);
 let cursorX = width / 2;
 let currentLevel = 0;
 let nextLevel = 0;
+let highestLevelReached = 0;
 let canDrop = true;
 let won = false;
 let lost = false;
@@ -182,7 +185,22 @@ function setFinalEvolutionReveal(revealed) {
 }
 
 function pickNextLevel() {
-  return Math.floor(Math.random() * 5);
+  const spawnProfiles = [
+    { minReached: 10, levels: [1, 2, 3, 4], weights: [8, 24, 34, 34] },
+    { minReached: 9, levels: [1, 2, 3, 4], weights: [10, 26, 34, 30] },
+    { minReached: 8, levels: [0, 1, 2, 3, 4], weights: [3, 13, 30, 31, 23] },
+    { minReached: 7, levels: [0, 1, 2, 3, 4], weights: [10, 18, 26, 26, 20] },
+    { minReached: 6, levels: [0, 1, 2, 3, 4], weights: [14, 20, 24, 23, 19] },
+    { minReached: 0, levels: [0, 1, 2, 3, 4], weights: [20, 20, 20, 20, 20] }
+  ];
+  const profile = spawnProfiles.find((entry) => highestLevelReached >= entry.minReached) || spawnProfiles.at(-1);
+  const totalWeight = profile.weights.reduce((sum, weight) => sum + weight, 0);
+  let roll = Math.random() * totalWeight;
+  for (let i = 0; i < profile.weights.length; i += 1) {
+    roll -= profile.weights[i];
+    if (roll <= 0) return profile.levels[i];
+  }
+  return profile.levels[profile.levels.length - 1];
 }
 
 function createEngine() {
@@ -224,6 +242,7 @@ function addWalls() {
 }
 
 function makeFlower(level, x, y) {
+  highestLevelReached = Math.max(highestLevelReached, level);
   const flower = flowerChain[level];
   const parts = createSpriteHitbox(flower.parts, x, y, flower.radius);
   const body = Body.create({
@@ -308,6 +327,7 @@ function mergeFlowers(a, b) {
 function fullBloom() {
   if (won) return;
   won = true;
+  highestLevelReached = Math.max(highestLevelReached, flowerChain.length - 1);
   setFinalEvolutionReveal(true);
   playWinSound();
   launchPetals(110);
@@ -346,6 +366,7 @@ function restartGame() {
   won = false;
   lost = false;
   canDrop = true;
+  highestLevelReached = 0;
   setFinalEvolutionReveal(false);
   winCard.hidden = true;
   gameOverCard.hidden = true;
