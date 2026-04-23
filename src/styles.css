@@ -761,7 +761,7 @@ h1 {
   }
 
   .love-envelope[open] {
-    --envelope-open-offset: clamp(248px, 61vw, 340px);
+    --envelope-open-offset: clamp(308px, 78vw, 430px);
     padding-top: var(--envelope-open-offset);
   }
 

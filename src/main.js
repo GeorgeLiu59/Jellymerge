@@ -5,13 +5,8 @@ import "./styles.css";
 const { Engine, World, Bodies, Body, Events, Composite } = Matter;
 const isDev = import.meta.env.DEV;
 
-const baseRadii = [25.725, 29.938, 35.154, 49.896, 62.37, 87.318, 84.5, 119, 132.5, 156.5, 181];
-const viewportWidth = Math.max(1, window.innerWidth || 0);
-const minViewportWidth = 390;
-const maxViewportWidth = 1200;
-const viewportT = Math.min(1, Math.max(0, (viewportWidth - minViewportWidth) / (maxViewportWidth - minViewportWidth)));
-const viewportRadiusScale = 2 / 3 + viewportT * (1 - 2 / 3);
-const radii = baseRadii.map((radius) => Number((radius * viewportRadiusScale).toFixed(3)));
+const baseRadii = [25.725, 27.938, 35.154, 49.896, 62.37, 87.318, 84.5, 119, 132.5, 156.5, 181];
+const radii = baseRadii.map((radius) => radius);
 const evolutionAngles = [20, 52, 84, 116, 148, 180, 212, 244, 276, 308, 340];
 const flowerChain = jellycatSprites.map((sprite, index) => ({
   ...sprite,
@@ -171,6 +166,18 @@ const suikaPhysics = {
   slop: 0.05
 };
 const DEBUG_HITBOXES = new URLSearchParams(window.location.search).has("hitboxes");
+
+function syncRadiiToStageWidth() {
+  const stageWidth = Math.max(300, Math.floor(stageWrap?.clientWidth || 740));
+  const defaultStageWidth = 740;
+  const shouldScaleByStageWidth = window.innerWidth <= 820;
+  const stageRadiusScale = shouldScaleByStageWidth ? Math.min(1, stageWidth / defaultStageWidth) : 1;
+  for (let i = 0; i < baseRadii.length; i += 1) {
+    const scaled = Number((baseRadii[i] * stageRadiusScale).toFixed(3));
+    radii[i] = scaled;
+    flowerChain[i].radius = scaled;
+  }
+}
 
 function waitForImage(image) {
   if (image.complete) return Promise.resolve();
@@ -388,6 +395,7 @@ function restartGame() {
   cancelAnimationFrame(raf);
   Engine.clear(engine);
   Composite.clear(engine.world, false);
+  syncRadiiToStageWidth();
   addWalls();
   currentLevel = pickNextLevel();
   nextLevel = pickNextLevel();
@@ -400,7 +408,7 @@ function restartGame() {
 function resizeCanvas() {
   width = Math.max(300, Math.floor(stageWrap.clientWidth));
   height = Math.max(320, Math.floor(stageWrap.clientHeight));
-  const maxDpr = viewportWidth <= 430 ? 1.5 : 2;
+  const maxDpr = width <= 430 ? 1.5 : 2;
   dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
   canvas.width = Math.floor(width * dpr);
   canvas.height = Math.floor(height * dpr);
@@ -408,6 +416,7 @@ function resizeCanvas() {
   canvas.style.height = `${height}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   cursorX = clamp(cursorX, 20, width - 20);
+  if (!engine || !engine.world.bodies.some((body) => body.flower)) syncRadiiToStageWidth();
   addWalls();
 }
 
@@ -877,6 +886,7 @@ window.addEventListener("click", unlockAudioOnFirstInteraction, { once: true });
 
 async function init() {
   await preloadSpriteImages();
+  syncRadiiToStageWidth();
   createEngine();
   currentLevel = pickNextLevel();
   nextLevel = pickNextLevel();
