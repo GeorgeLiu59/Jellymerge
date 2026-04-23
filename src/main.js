@@ -171,7 +171,9 @@ function syncRadiiToStageWidth() {
   const stageWidth = Math.max(300, Math.floor(stageWrap?.clientWidth || 740));
   const defaultStageWidth = 740;
   const shouldScaleByStageWidth = window.innerWidth <= 820;
-  const stageRadiusScale = shouldScaleByStageWidth ? Math.min(1, stageWidth / defaultStageWidth) : 1;
+  const stageRadiusScale = shouldScaleByStageWidth
+    ? Math.min(1, (stageWidth / defaultStageWidth) * 1.2)
+    : 1;
   for (let i = 0; i < baseRadii.length; i += 1) {
     const scaled = Number((baseRadii[i] * stageRadiusScale).toFixed(3));
     radii[i] = scaled;
