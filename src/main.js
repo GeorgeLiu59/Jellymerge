@@ -7,8 +7,11 @@ const isDev = import.meta.env.DEV;
 
 const baseRadii = [25.725, 29.938, 35.154, 49.896, 62.37, 87.318, 84.5, 119, 132.5, 156.5, 181];
 const viewportWidth = Math.max(1, window.innerWidth || 0);
-const mobileRadiusScale = viewportWidth <= 430 ? 0.82 : viewportWidth <= 820 ? 0.9 : 1;
-const radii = baseRadii.map((radius) => Number((radius * mobileRadiusScale).toFixed(3)));
+const minViewportWidth = 390;
+const maxViewportWidth = 1200;
+const viewportT = Math.min(1, Math.max(0, (viewportWidth - minViewportWidth) / (maxViewportWidth - minViewportWidth)));
+const viewportRadiusScale = 2 / 3 + viewportT * (1 - 2 / 3);
+const radii = baseRadii.map((radius) => Number((radius * viewportRadiusScale).toFixed(3)));
 const evolutionAngles = [20, 52, 84, 116, 148, 180, 212, 244, 276, 308, 340];
 const flowerChain = jellycatSprites.map((sprite, index) => ({
   ...sprite,
