@@ -273,7 +273,7 @@ function makeFlower(level, x, y) {
   });
   Body.setPosition(body, { x, y });
   Body.setInertia(body, body.inertia * 2.2);
-  body.sleepThreshold = 40;
+  body.sleepThreshold = 45;
   body.flower = { level, bornAt: performance.now() };
   for (const part of body.parts) part.flower = body.flower;
   return body;
