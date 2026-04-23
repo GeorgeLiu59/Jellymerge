@@ -721,9 +721,7 @@ h1 {
   }
 
   .quick-controls {
-    left: 14px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + clamp(74px, 11vh, 112px));
-    gap: 6px;
+    display: none;
   }
 
   .quick-controls button {
