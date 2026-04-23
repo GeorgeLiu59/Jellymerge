@@ -162,6 +162,7 @@ button:focus-visible {
 }
 
 .love-envelope {
+  --envelope-open-offset: clamp(276px, 34vw, 374px);
   margin: 0;
   display: block;
   position: relative;
@@ -171,7 +172,7 @@ button:focus-visible {
 }
 
 .love-envelope[open] {
-  padding-top: 372px;
+  padding-top: var(--envelope-open-offset);
 }
 
 .love-envelope summary {
@@ -719,6 +720,18 @@ h1 {
     padding-top: 0;
   }
 
+  .quick-controls {
+    left: 14px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + clamp(74px, 11vh, 112px));
+    gap: 6px;
+  }
+
+  .quick-controls button {
+    min-width: 68px;
+    padding: 0.34rem 0.5rem;
+    font-size: 0.68rem;
+  }
+
   .stage-wrap {
     width: 100%;
     height: 68svh;
@@ -748,7 +761,8 @@ h1 {
   }
 
   .love-envelope[open] {
-    padding-top: 286px;
+    --envelope-open-offset: clamp(248px, 61vw, 340px);
+    padding-top: var(--envelope-open-offset);
   }
 
   .love-envelope {
