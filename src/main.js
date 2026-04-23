@@ -161,9 +161,9 @@ const PLAY_DEPTH_SKEW = 24;
 const suikaPhysics = {
   friction: 0.032,
   frictionStatic: 0.04,
-  frictionAir: 0.009,
-  restitution: 0.002,
-  slop: 0.05
+  frictionAir: 0.0096,
+  restitution: 0.0015,
+  slop: 0.055
 };
 const DEBUG_HITBOXES = new URLSearchParams(window.location.search).has("hitboxes");
 
@@ -224,7 +224,8 @@ function pickNextLevel() {
 
 function createEngine() {
   engine = Engine.create({
-    gravity: { x: 0, y: 1.5 }
+    gravity: { x: 0, y: 1.5 },
+    enableSleeping: true
   });
   engine.positionIterations = 8;
   engine.velocityIterations = 6;
@@ -272,6 +273,7 @@ function makeFlower(level, x, y) {
   });
   Body.setPosition(body, { x, y });
   Body.setInertia(body, body.inertia * 2.2);
+  body.sleepThreshold = 40;
   body.flower = { level, bornAt: performance.now() };
   for (const part of body.parts) part.flower = body.flower;
   return body;
@@ -285,15 +287,16 @@ function createSpriteHitbox(spriteParts, x, y, radius, level) {
   const spreadScale = radius <= 50 ? 0.99 : radius <= 101 ? 0.97 : 0.94;
   const radiusScale = radius <= 50 ? 0.8 : radius <= 101 ? 0.76 : 0.7;
   const levelTighten = 1;
+  const dragonfruitColliderBoost = level === 5 ? 1.04 : 1;
   const partOptions = {
     ...suikaPhysics,
     render: { visible: false }
   };
   return spriteParts.map((part) =>
     Bodies.circle(
-      x + part.x * radius * spreadScale * levelTighten,
-      y + part.y * radius * spreadScale * levelTighten,
-      Math.max(3, part.r * radius * 2 * radiusScale * levelTighten),
+      x + part.x * radius * spreadScale * levelTighten * dragonfruitColliderBoost,
+      y + part.y * radius * spreadScale * levelTighten * dragonfruitColliderBoost,
+      Math.max(3, part.r * radius * 2 * radiusScale * levelTighten * dragonfruitColliderBoost),
       partOptions
     )
   );
@@ -615,10 +618,11 @@ function drawDropper() {
 function drawFlowerBody(body) {
   const level = body.flower.level;
   const data = flowerChain[level];
+  const visualLift = level === 5 ? Math.max(2, data.radius * 0.04) : 0;
   ctx.save();
   ctx.translate(body.position.x, body.position.y);
   ctx.rotate(body.angle);
-  drawPlush(0, 0, data.radius, data);
+  drawPlush(0, -visualLift, data.radius, data);
   if (DEBUG_HITBOXES) drawBodyHitboxes(body);
   ctx.restore();
 }
